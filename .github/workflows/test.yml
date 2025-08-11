@@ -72,6 +72,26 @@ jobs:
       if: steps.cache-blender.outputs.cache-hit != 'true'
       run: python scripts/blender_downloader.py ${{ matrix.blender.version }} -o blender
 
+    - name: Check if mitsuba_version branch
+      id: check-branch
+      shell: bash
+      run: |
+        if [[ "${{ github.head_ref || github.ref_name }}" == mitsuba_version* ]]; then
+          echo "::set-output name=is_mitsuba_version::true"
+        else
+          echo "::set-output name=is_mitsuba_version::false"
+        fi
+
+    - name: Build Mitsuba if needed (Ubuntu)
+      if: steps.check-branch.outputs.is_mitsuba_version == 'true' && matrix.environment.os == 'ubuntu-latest'
+      uses: ./.github/workflows/build_mitsuba_ubuntu
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build Mitsuba if needed (Windows)
+      if: steps.check-branch.outputs.is_mitsuba_version == 'true' && matrix.environment.os == 'windows-latest'
+      uses: ./.github/workflows/build_mitsuba_windows
+
     - name: Install Blender dependencies
       shell: bash
       run: |
@@ -80,12 +100,23 @@ jobs:
         ./$BLENDER_PYTHON -m ensurepip
         ./$BLENDER_PYTHON -m pip install -U pip
         ./$BLENDER_PYTHON -m pip install --upgrade pytest pytest-cov
-        ./$BLENDER_PYTHON -m pip install mitsuba==${{ matrix.environment.mitsuba-version }} --force-reinstall
+        if [[ "${{ steps.check-branch.outputs.is_mitsuba_version }}" == "true" ]]; then
+          echo "Using local Mitsuba build"
+          export PYTHONPATH="$PWD/mitsuba3/build/python:$PYTHONPATH"
+        else
+          echo "Using PyPI Mitsuba"
+          ./$BLENDER_PYTHON -m pip install mitsuba==${{ matrix.environment.mitsuba-version }} --force-reinstall
+        fi
 
     - name: Run Addon test suite
       shell: bash
       run: |
         BLENDER_EXECUTABLE=$(find blender/ -maxdepth 1 -regextype posix-extended -regex '.*blender(.exe)?' -print -quit)
         echo "Blender Executable is $BLENDER_EXECUTABLE"
-        ./$BLENDER_EXECUTABLE -b -noaudio --factory-startup --python scripts/run_tests.py -- -v --cov=mitsuba-blender
-
+        if [[ "${{ steps.check-branch.outputs.is_mitsuba_version }}" == "true" ]]; then
+          echo "Running tests with local Mitsuba build"
+          ./$BLENDER_EXECUTABLE -b -noaudio --factory-startup --python scripts/run_tests.py --mitsuba "$PWD/mitsuba3/build" -- -v --cov=mitsuba-blender
+        else
+          echo "Running tests with PyPI Mitsuba"
+          ./$BLENDER_EXECUTABLE -b -noaudio --factory-startup --python scripts/run_tests.py -- -v --cov=mitsuba-blender
+        fi
