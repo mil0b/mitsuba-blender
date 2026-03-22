@@ -1,8 +1,8 @@
 bl_info = {
     'name': 'Mitsuba-Blender',
     'author': 'Baptiste Nicolet, Dorian Ros, Rami Tabbara',
-    'version': (0, 1),
-    'blender': (2, 93, 0),
+    'version': (0, 2),
+    'blender': (5, 0, 0),
     'category': 'Render',
     'location': 'File menu, render engine menu',
     'description': 'Mitsuba integration for Blender',
@@ -22,7 +22,14 @@ import subprocess
 
 from . import io, engine
 
-DEPS_MITSUBA_VERSION = '3.5.0'
+DEPS_MITSUBA_VERSION = '3.8.0'
+DEPS_MITSUBA_MIN_VERSION = (3, 8, 0)
+
+def _parse_version(version_str):
+    try:
+        return tuple(int(x) for x in version_str.split('.')[:3])
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
 
 def get_addon_preferences(context):
     return context.preferences.addons[__name__].preferences
@@ -38,9 +45,6 @@ def init_mitsuba(context):
             import importlib
             importlib.reload(mitsuba)
         mitsuba.set_variant('scalar_rgb')
-        # Set the global threading environment
-        from mitsuba import ThreadEnvironment
-        bpy.types.Scene.thread_env = ThreadEnvironment()
         return True
     except ModuleNotFoundError:
         return False
@@ -185,10 +189,10 @@ def update_mitsuba_custom_path(self, context):
             try_reload_mitsuba(context)
 
 def update_installed_dependencies_version(self, context):
-    self.has_valid_dependencies_version = self.installed_dependencies_version == DEPS_MITSUBA_VERSION
+    self.has_valid_dependencies_version = _parse_version(self.installed_dependencies_version) >= DEPS_MITSUBA_MIN_VERSION
 
 def update_mitsuba_custom_version(self, context):
-    self.has_valid_mitsuba_custom_version = self.mitsuba_custom_version == DEPS_MITSUBA_VERSION
+    self.has_valid_mitsuba_custom_version = _parse_version(self.mitsuba_custom_version) >= DEPS_MITSUBA_MIN_VERSION
 
 class MitsubaPreferences(AddonPreferences):
     bl_idname = __name__
@@ -290,6 +294,12 @@ def register():
     for cls in classes:
         register_class(cls)
 
+    # Ensure user site-packages are on the path (needed when mitsuba is pip-installed)
+    import site
+    user_site = site.getusersitepackages()
+    if user_site not in sys.path:
+        sys.path.append(user_site)
+
     context = bpy.context
     prefs = get_addon_preferences(context)
     prefs.require_restart = False
@@ -300,7 +310,7 @@ def register():
     check_pip_dependencies(context)
     if try_register_mitsuba(context):
         import mitsuba
-        print(f'mitsuba-blender v{".".join(str(e) for e in bl_info["version"])}{bl_info["warning"] if "warning" in bl_info else ""} registered (with mitsuba v{mitsuba.__version__})')
+        print(f'mitsuba-blender v{"." .join(str(e) for e in bl_info["version"])}{bl_info["warning"] if "warning" in bl_info else ""} registered (with mitsuba v{mitsuba.__version__})')
 
 def unregister():
     for cls in classes:

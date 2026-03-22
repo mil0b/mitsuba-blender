@@ -375,6 +375,14 @@ def load_mitsuba_scene(bl_context, bl_scene, bl_collection, filepath, global_mat
     global_mat: Axis conversion matrix
     '''
     start_time = time.time()
+    # NOTE: xml_to_props was removed in mitsuba 3.6+. The importer requires
+    # a raw property tree which is no longer available via the public API.
+    # TODO: rewrite importer to work with mitsuba 3.8+ scene objects.
+    raise NotImplementedError(
+        'Mitsuba XML import is not yet supported with mitsuba >= 3.6. '
+        'The xml_to_props API was removed. '
+        'Rendering and export are unaffected.'
+    )
     # Load the Mitsuba XML and extract the objects' properties
     from mitsuba import xml_to_props
     raw_props = xml_to_props(filepath)

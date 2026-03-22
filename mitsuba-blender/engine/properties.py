@@ -267,14 +267,9 @@ class MitsubaRenderSettings(PropertyGroup):
     It creates classes for each plugin described in the JSON files dynamically.
     '''
 
-    from mitsuba import variant, variants, config
-    enum_variants = []
-    for var in variants():
-        enum_variants.append((var, var, ""))
-
-    if config.MI_DEFAULT_VARIANT:
-        default_variant = config.MI_DEFAULT_VARIANT
-    default_variant = variant()
+    from mitsuba import variant, variants
+    enum_variants = [(var, var, "") for var in variants()]
+    default_variant = variant() or 'scalar_rgb'
 
     variant : EnumProperty(
         name = "Variant",

@@ -21,6 +21,64 @@ from . import geometry
 from . import lights
 from . import camera
 
+def _dict_to_xml_node(data, name=None, indent=0):
+    '''Recursively convert a Mitsuba scene dict to XML lines.'''
+    lines = []
+    pad = '    ' * indent
+
+    if not isinstance(data, dict):
+        return lines
+
+    plugin_type = data.get('type')
+    tag = name if name else 'scene'
+
+    if plugin_type:
+        attrs = f' type="{plugin_type}"'
+        if 'id' in data:
+            attrs += f' id="{data["id"]}"'
+        children = {k: v for k, v in data.items() if k not in ('type', 'id')}
+        if not children:
+            lines.append(f'{pad}<{tag}{attrs}/>')
+        else:
+            lines.append(f'{pad}<{tag}{attrs}>')
+            for k, v in children.items():
+                lines.extend(_dict_value_to_xml(k, v, indent + 1))
+            lines.append(f'{pad}</{tag}>')
+    elif name is None:
+        # Root scene node
+        lines.append(f'{pad}<scene version="3.0.0">')
+        for k, v in data.items():
+            if k != 'type':
+                lines.extend(_dict_value_to_xml(k, v, indent + 1))
+        lines.append(f'{pad}</scene>')
+
+    return lines
+
+def _dict_value_to_xml(name, value, indent):
+    pad = '    ' * indent
+    if isinstance(value, dict):
+        return _dict_to_xml_node(value, name=name, indent=indent)
+    elif isinstance(value, bool):
+        return [f'{pad}<boolean name="{name}" value="{str(value).lower()}"/>']
+    elif isinstance(value, int):
+        return [f'{pad}<integer name="{name}" value="{value}"/>']
+    elif isinstance(value, float):
+        return [f'{pad}<float name="{name}" value="{value}"/>']
+    elif isinstance(value, str):
+        return [f'{pad}<string name="{name}" value="{value}"/>']
+    elif isinstance(value, (list, tuple)) and len(value) in (3, 4):
+        vals = ', '.join(str(x) for x in value)
+        tag = 'rgb' if len(value) == 3 else 'spectrum'
+        return [f'{pad}<{tag} name="{name}" value="{vals}"/>']
+    return []
+
+def _write_mitsuba_xml(scene_data, path):
+    lines = ['<?xml version="1.0" encoding="utf-8"?>']
+    lines.extend(_dict_to_xml_node(scene_data))
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+
+
 class SceneConverter:
     '''
     Converts a blender scene to a Mitsuba-compatible dict.
@@ -33,17 +91,13 @@ class SceneConverter:
         self.render = render
 
     def set_path(self, name, split_files=False):
-        from mitsuba.python.xml import WriteXML
-        # Ideally, this should only be created if we want to write a scene.
-        # For now we need it to save meshes and packed textures.
-        # TODO: get rid of all writing to disk when creating the dict
         if not self.render:
-            self.xml_writer = WriteXML(name, self.export_ctx.subfolders,
-                                       split_files=split_files)
+            self.xml_output_path = name
+            self.xml_split_files = split_files
         # Give the path to the export context, for saving meshes and files
         self.export_ctx.directory, _ = os.path.split(name)
 
-    def scene_to_dict(self, depsgraph, window_manager):
+    def scene_to_dict(self, depsgraph, window_manager=None):
         # Switch to object mode before exporting stuff, so everything is defined properly
         if bpy.ops.object.mode_set.poll():
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -75,7 +129,8 @@ class SceneConverter:
         progress_counter = 0
         # Main export loop
         for object_instance in depsgraph.object_instances:
-            window_manager.progress_update(progress_counter)
+            if window_manager is not None:
+                window_manager.progress_update(progress_counter)
             progress_counter += 1
 
             if self.use_selection:
@@ -88,7 +143,7 @@ class SceneConverter:
 
             evaluated_obj = object_instance.object
             object_type = evaluated_obj.type
-            #type: enum in [‘MESH’, ‘CURVE’, ‘SURFACE’, ‘META’, ‘FONT’, ‘ARMATURE’, ‘LATTICE’, ‘EMPTY’, ‘GPENCIL’, ‘CAMERA’, ‘LIGHT’, ‘SPEAKER’, ‘LIGHT_PROBE’], default ‘EMPTY’, (readonly)
+            #type: enum in ['MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'ARMATURE', 'LATTICE', 'EMPTY', 'GPENCIL', 'CAMERA', 'LIGHT', 'SPEAKER', 'LIGHT_PROBE'], default 'EMPTY', (readonly)
             if evaluated_obj.hide_render or (object_instance.is_instance
                 and evaluated_obj.parent and evaluated_obj.parent.original.hide_render):
                 self.export_ctx.log("Object: {} is hidden for render. Ignoring it.".format(evaluated_obj.name), 'INFO')
@@ -105,7 +160,7 @@ class SceneConverter:
                 self.export_ctx.log("Object: %s of type '%s' is not supported!" % (evaluated_obj.name_full, object_type), 'WARN')
 
     def dict_to_xml(self):
-        self.xml_writer.process(self.export_ctx.scene_data)
+        _write_mitsuba_xml(self.export_ctx.scene_data, self.xml_output_path)
 
     def dict_to_scene(self):
         from mitsuba import load_dict
